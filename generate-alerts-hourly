@@ -1,0 +1,71 @@
+import boto3
+import csv
+import random
+import datetime
+import io
+import os
+
+# Load S3 bucket name from Lambda environment variable
+BUCKET_NAME = os.environ["BUCKET_NAME"]
+
+# Constants
+ALERT_TYPES = ['COMM_DOWN', 'TEMP_HIGH', 'ALARM_NO_RESPONSE']
+REGIONS = ['Asia', 'ENA', 'Europe']
+ENGINEERS = ['Anjali', 'Ravi', 'Fatima', 'Chen', 'Luis']
+
+s3 = boto3.client('s3')
+
+def generate_status(alert_type, comm_duration, timestamp):
+    now = datetime.datetime.utcnow()
+    alert_time = datetime.datetime.fromisoformat(timestamp)
+    age_minutes = (now - alert_time).total_seconds() / 60
+
+    if alert_type == "COMM_DOWN" and comm_duration and comm_duration > 30:
+        return "Escalated"
+    elif age_minutes > 60:
+        return "Resolved"
+    else:
+        return random.choice(["Active", "Pending"])
+
+def lambda_handler(event, context):
+    alerts = []
+
+    for _ in range(10):
+        alert_type = random.choice(ALERT_TYPES)
+        comm_duration = random.choice([10, 20, 35, 50, None])
+        timestamp = (datetime.datetime.utcnow() - datetime.timedelta(minutes=random.randint(0, 120))).isoformat()
+        
+        status = generate_status(alert_type, comm_duration, timestamp)
+        ticket_id = f"TCK-{random.randint(10000, 99999)}"
+        assigned_to = random.choice(ENGINEERS)
+
+        alerts.append({
+            "DeviceID": f"ELEV-{random.randint(100, 999)}",
+            "Region": random.choice(REGIONS),
+            "AlertType": alert_type,
+            "CommDuration": comm_duration,
+            "Status": status,
+            "TicketID": ticket_id,
+            "AssignedTo": assigned_to,
+            "Timestamp": timestamp
+        })
+
+    # Write CSV to memory
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=alerts[0].keys())
+    writer.writeheader()
+    for alert in alerts:
+        writer.writerow(alert)
+
+    # Upload to S3
+    timestamp_key = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M")
+    key = f"alerts/hourly/alerts_{timestamp_key}.csv"
+    
+    s3.put_object(Bucket=BUCKET_NAME, Key=key, Body=buffer.getvalue())
+
+    return {
+        "statusCode": 200,
+        "body": f"Uploaded: {key} to bucket: {BUCKET_NAME}"
+    }
+
+   
